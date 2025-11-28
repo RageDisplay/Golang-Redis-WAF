@@ -26,14 +26,12 @@ type WAFProxy struct {
 }
 
 type AppConfig struct {
-	TargetURL      string `json:"target_url"`
-	ListenPort     string `json:"listen_port"`
-	AppPort        string `json:"app_port"`
-	EnableSQLi     bool   `json:"enable_sqli"`
-	EnableXSS      bool   `json:"enable_xss"`
-	EnableCMDi     bool   `json:"enable_cmdi"`
-	EnablePath     bool   `json:"enable_path"`
-	EnableAnalyzer bool   `json:"enable_analyzer"`
+	TargetURL  string `json:"target_url"`
+	ListenPort string `json:"listen_port"`
+	EnableSQLi bool   `json:"enable_sqli"`
+	EnableXSS  bool   `json:"enable_xss"`
+	EnableCMDi bool   `json:"enable_cmdi"`
+	EnablePath bool   `json:"enable_path"`
 }
 
 type AnalysisRequest struct {
@@ -66,8 +64,8 @@ func NewWAFProxy(target string, redisAddr string) (*WAFProxy, error) {
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Password: "",
+		DB:       0,
 	})
 
 	p := &WAFProxy{
@@ -99,21 +97,28 @@ func NewWAFProxy(target string, redisAddr string) (*WAFProxy, error) {
 func (p *WAFProxy) checkRequest(r *http.Request) (bool, []string) {
 	var threats []string
 
-	// Check URL and query params
-	if threatsFound := p.checkPatterns(r.URL.String() + " " + r.URL.RawQuery); len(threatsFound) > 0 {
+	// Check URL and query params - ДЕКОДИРУЕМ URL
+	fullURL := r.URL.String() + " " + r.URL.RawQuery
+	decodedURL, _ := url.QueryUnescape(fullURL)
+	log.Printf("Checking URL (decoded): %s", decodedURL)
+
+	if threatsFound := p.checkPatterns(decodedURL, "url"); len(threatsFound) > 0 {
 		threats = append(threats, threatsFound...)
 	}
 
-	// Check headers
+	// Check headers - ТОЛЬКО ДЛЯ ОПАСНЫХ ЗАГОЛОВКОВ
 	for name, values := range r.Header {
-		for _, value := range values {
-			if threatsFound := p.checkPatterns(name + ": " + value); len(threatsFound) > 0 {
-				threats = append(threats, threatsFound...)
+		// Проверяем только подозрительные заголовки
+		if p.isSuspiciousHeader(name) {
+			for _, value := range values {
+				if threatsFound := p.checkPatterns(name+": "+value, "header"); len(threatsFound) > 0 {
+					threats = append(threats, threatsFound...)
+				}
 			}
 		}
 	}
 
-	// Check body for POST/PUT
+	// Check body for POST/PUT - ДЕКОДИРУЕМ FORM DATA
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -121,15 +126,44 @@ func (p *WAFProxy) checkRequest(r *http.Request) (bool, []string) {
 		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		if threatsFound := p.checkPatterns(string(bodyBytes)); len(threatsFound) > 0 {
-			threats = append(threats, threatsFound...)
+		bodyStr := string(bodyBytes)
+
+		// Если это form data, декодируем её
+		if strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+			decodedBody, _ := url.QueryUnescape(bodyStr)
+			log.Printf("Checking body (decoded): %s", decodedBody)
+			if threatsFound := p.checkPatterns(decodedBody, "body"); len(threatsFound) > 0 {
+				threats = append(threats, threatsFound...)
+			}
+		} else {
+			log.Printf("Checking body: %s", bodyStr)
+			if threatsFound := p.checkPatterns(bodyStr, "body"); len(threatsFound) > 0 {
+				threats = append(threats, threatsFound...)
+			}
 		}
 	}
 
+	log.Printf("Total threats found: %d", len(threats))
 	return len(threats) > 0, threats
 }
 
-func (p *WAFProxy) checkPatterns(input string) []string {
+func (p *WAFProxy) isSuspiciousHeader(name string) bool {
+	// Проверяем только потенциально опасные заголовки
+	suspiciousHeaders := []string{
+		"user-agent", "referer", "origin", "cookie",
+		"x-forwarded-for", "x-real-ip", "authorization",
+	}
+
+	nameLower := strings.ToLower(name)
+	for _, header := range suspiciousHeaders {
+		if strings.Contains(nameLower, header) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *WAFProxy) checkPatterns(input, inputType string) []string {
 	ctx := context.Background()
 	var threats []string
 
@@ -163,9 +197,17 @@ func (p *WAFProxy) checkPatterns(input string) []string {
 				continue
 			}
 
-			if re.MatchString(input) {
+			matches := re.FindStringSubmatch(input)
+			if matches != nil {
+				log.Printf("PATTERN MATCHED! Category: %s, Pattern: %s, Input: %s",
+					category.name, pattern, input)
+
+				// False positive проверки
+				if p.isFalsePositive(input, category.name, pattern, inputType) {
+					log.Printf("False positive, skipping")
+					continue
+				}
 				threats = append(threats, category.name+": "+pattern)
-				// Update statistics
 				p.updateStats(category.name)
 			}
 		}
@@ -174,16 +216,38 @@ func (p *WAFProxy) checkPatterns(input string) []string {
 	return threats
 }
 
+func (p *WAFProxy) isFalsePositive(input, category, pattern, inputType string) bool {
+	inputLower := strings.ToLower(input)
+
+	// Для SQLi: разрешаем простые параметры в URL
+	if category == "sqli" && inputType == "url" {
+		// Разрешаем очень короткие безопасные параметры
+		if len(input) < 10 && regexp.MustCompile(`^[a-z0-9=&?\-_\.]+$`).MatchString(inputLower) {
+			return true
+		}
+		// Разрешаем обычные параметры типа id=123
+		if regexp.MustCompile(`^(id|name|page|size|search|q)=[a-z0-9]+$`).MatchString(inputLower) {
+			return true
+		}
+	}
+
+	// Для Command Injection в заголовках: игнорируем quality values (;q=0.9)
+	if category == "cmdi" && inputType == "header" {
+		if strings.Contains(inputLower, ";q=") {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (p *WAFProxy) updateStats(threatType string) {
 	ctx := context.Background()
 
-	// Увеличиваем счетчик заблокированных запросов
+	p.redisClient.Incr(ctx, "waf:stats:total_requests")
 	p.redisClient.Incr(ctx, "waf:stats:blocked_requests")
-
-	// Увеличиваем счетчик для конкретного типа угроз
 	p.redisClient.Incr(ctx, "waf:stats:threats:"+threatType)
 
-	// Логируем блокировку
 	logEntry := LogEntry{
 		Timestamp: time.Now(),
 		IP:        "127.0.0.1",
@@ -195,81 +259,7 @@ func (p *WAFProxy) updateStats(threatType string) {
 
 	logData, _ := json.Marshal(logEntry)
 	p.redisClient.LPush(ctx, "waf:logs", logData)
-	// Ограничиваем список логов 1000 записями
 	p.redisClient.LTrim(ctx, "waf:logs", 0, 999)
-}
-
-func (p *WAFProxy) analyzeRequest(r *http.Request) (*AnalysisResponse, error) {
-	bodyBytes, _ := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	headers := make(map[string]string)
-	for name, values := range r.Header {
-		headers[name] = strings.Join(values, ", ")
-	}
-
-	reqData := AnalysisRequest{
-		Method:  r.Method,
-		URL:     r.URL.String(),
-		Headers: headers,
-		Body:    string(bodyBytes),
-	}
-
-	jsonData, err := json.Marshal(reqData)
-	if err != nil {
-		return nil, err
-	}
-
-	analyzerURL := "http://analyzer:8083/analyze"
-	if url := os.Getenv("ANALYZER_URL"); url != "" {
-		analyzerURL = url
-	}
-
-	resp, err := p.analyzerClient.Post(analyzerURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var analysisResp AnalysisResponse
-	if err := json.NewDecoder(resp.Body).Decode(&analysisResp); err != nil {
-		return nil, err
-	}
-
-	// Логируем анализ если есть угрозы
-	if analysisResp.ThreatLevel > 0 {
-		log.Printf("Analyzer detected threats: %v, level: %d", analysisResp.Matches, analysisResp.ThreatLevel)
-	}
-
-	return &analysisResp, nil
-}
-
-func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Увеличиваем счетчик всех запросов
-	p.updateTotalRequests()
-
-	// First check with fast pattern matching
-	if isBlocked, threats := p.checkRequest(r); isBlocked {
-		log.Printf("Request blocked by WAF. Threats: %v", threats)
-		http.Error(w, "Request blocked by WAF", http.StatusForbidden)
-		return
-	}
-
-	// Then perform deeper analysis if analyzer is enabled
-	if p.config != nil && p.config.EnableAnalyzer {
-		analysis, err := p.analyzeRequest(r)
-		if err != nil {
-			log.Printf("Analysis error: %v", err)
-			// Continue with request if analysis fails
-		} else if analysis.ThreatLevel > 5 { // Medium threat level
-			log.Printf("Request blocked by analyzer. Threat level: %d", analysis.ThreatLevel)
-			p.updateBlockedRequests()
-			http.Error(w, "Request blocked by WAF analyzer", http.StatusForbidden)
-			return
-		}
-	}
-
-	p.proxy.ServeHTTP(w, r)
 }
 
 func (p *WAFProxy) updateTotalRequests() {
@@ -277,9 +267,21 @@ func (p *WAFProxy) updateTotalRequests() {
 	p.redisClient.Incr(ctx, "waf:stats:total_requests")
 }
 
-func (p *WAFProxy) updateBlockedRequests() {
-	ctx := context.Background()
-	p.redisClient.Incr(ctx, "waf:stats:blocked_requests")
+func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p.updateTotalRequests()
+
+	log.Printf("=== NEW REQUEST ===")
+	log.Printf("Method: %s, URL: %s", r.Method, r.URL.String())
+
+	// Check with pattern matching
+	if isBlocked, threats := p.checkRequest(r); isBlocked {
+		log.Printf("Request blocked by WAF. Threats: %v", threats)
+		http.Error(w, "Request blocked by WAF", http.StatusForbidden)
+		return
+	}
+
+	log.Printf("Request allowed, proxying to target")
+	p.proxy.ServeHTTP(w, r)
 }
 
 func (p *WAFProxy) loadConfig() {
@@ -288,15 +290,13 @@ func (p *WAFProxy) loadConfig() {
 	data, err := p.redisClient.Get(ctx, "waf:config").Result()
 	if err != nil {
 		log.Printf("Error loading config from Redis: %v", err)
-		// Use default config if none exists
 		p.config = &AppConfig{
-			TargetURL:      "http://192.168.200.50:7000",
-			ListenPort:     "8081",
-			EnableSQLi:     true,
-			EnableXSS:      true,
-			EnableCMDi:     true,
-			EnablePath:     true,
-			EnableAnalyzer: true,
+			TargetURL:  "http://192.168.200.50:7000",
+			ListenPort: "8081",
+			EnableSQLi: true,
+			EnableXSS:  true,
+			EnableCMDi: true,
+			EnablePath: true,
 		}
 		return
 	}
@@ -308,8 +308,9 @@ func (p *WAFProxy) loadConfig() {
 	}
 
 	p.config = &config
+	log.Printf("Loaded config: SQLi=%t, XSS=%t, CMDi=%t, Path=%t",
+		config.EnableSQLi, config.EnableXSS, config.EnableCMDi, config.EnablePath)
 
-	// Update target URL if changed
 	if config.TargetURL != "" && config.TargetURL != p.target.String() {
 		newTarget, err := url.Parse(config.TargetURL)
 		if err == nil {
@@ -345,10 +346,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Load initial configuration
 	proxy.loadConfig()
-
-	// Start configuration watcher
 	proxy.startConfigWatcher()
 
 	port := os.Getenv("PORT")

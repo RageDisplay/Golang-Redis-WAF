@@ -28,14 +28,12 @@
                     <label class="form-label">URL защищаемого приложения</label>
                     <input type="url" class="form-control" name="target_url" value="{{.TargetURL}}" required 
                            placeholder="http://192.168.200.50:7000">
-                    <small style="color: #666; font-size: 0.875rem;">Включая порт приложения (например :7000)</small>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Порт WAF</label>
                     <input type="number" class="form-control" name="listen_port" value="{{.ListenPort}}" required 
                            min="1" max="65535">
-                    <small style="color: #666; font-size: 0.875rem;">Порт, на котором будет работать WAF прокси</small>
                 </div>
 
                 <div class="form-group">
@@ -64,16 +62,6 @@
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enable_analyzer" name="enable_analyzer" {{if .EnableAnalyzer}}checked{{end}}>
-                        <label for="enable_analyzer">Включить анализатор запросов (глубокий анализ)</label>
-                    </div>
-                    <small style="color: #666; font-size: 0.875rem; margin-left: 1.5rem;">
-                        Дополнительная проверка запросов с помощью ML анализатора
-                    </small>
-                </div>
-
                 <button type="submit" class="btn btn-primary" id="saveBtn">
                     <span id="saveText">Сохранить настройки</span>
                     <span id="saveLoading" class="loading" style="display: none;"></span>
@@ -95,8 +83,7 @@
                 enable_sqli: formData.get('enable_sqli') === 'on',
                 enable_xss: formData.get('enable_xss') === 'on',
                 enable_cmdi: formData.get('enable_cmdi') === 'on',
-                enable_path: formData.get('enable_path') === 'on',
-                enable_analyzer: formData.get('enable_analyzer') === 'on'
+                enable_path: formData.get('enable_path') === 'on'
             };
 
             const saveBtn = document.getElementById('saveBtn');
@@ -119,7 +106,6 @@
 
                 if (response.ok) {
                     message.innerHTML = '<div class="alert alert-success">Настройки успешно сохранены!</div>';
-                    // Перезагружаем страницу через 2 секунды для применения изменений
                     setTimeout(() => {
                         window.location.reload();
                     }, 2000);

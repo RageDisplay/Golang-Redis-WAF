@@ -32,38 +32,69 @@ func NewSignatureServer(redisAddr string) *SignatureServer {
 func (s *SignatureServer) LoadInitialSignatures() {
 	ctx := context.Background()
 
-	// SQL Injection patterns
+	// SQL Injection patterns - СТАНДАРТНЫЕ
 	sqlPatterns := []string{
-		`(?i)(\bunion\b.*\bselect\b|\bselect\b.*\bfrom\b|\binsert\b.*\binto\b|\bdelete\b.*\bfrom\b)`,
-		`(?i)(\bdrop\b|\bupdate\b.*\bset\b|'|--|\bwaitfor\b.*\bdelay\b)`,
-		`(?i)(\bexec\b|\bxp_cmdshell\b|\btruncate\b|\bdeclare\b)`,
-		`(?i)(\bor\b.*\b\d+\s*=\s*\d+)`,
+		`(?i)(union.*select|select.*from|insert.*into|delete.*from)`,
+		`(?i)(drop.*table|update.*set|waitfor.*delay)`,
+		`(?i)(exec|xp_cmdshell|truncate|declare)`,
+		`(?i)(or.*\d+\s*=\s*\d+)`,
+		`(--|#|\/\*)`,
 	}
 
 	// XSS patterns
 	xssPatterns := []string{
-		`(?i)(<script.*?>|javascript:|on\w+\s*=)`,
-		`(?i)(<\w+.*?\s+on\w+\s*=|alert\(|document\.cookie)`,
-		`(?i)(eval\(|window\.location|vbscript:)`,
+		`(<script|javascript:|on\w+=)`,
+		`(alert\(|document\.cookie|eval\()`,
+		`(vbscript:|window\.location)`,
 	}
 
-	// Command Injection
+	// Command Injection - ПРОСТЫЕ ПАТТЕРНЫ
 	cmdPatterns := []string{
-		`(?i)(;|\||&)\s*(pwd|ls|cat|echo|rm|mv|cp|chmod|wget|curl)`,
-		`\b(rm\s+-rf|chmod\s+777)\b`,
+		`(\|.*whoami)`,
+		`(;.*whoami)`,
+		`(&.*whoami)`,
+		`(\|.*pwd)`,
+		`(;.*pwd)`,
+		`(&.*pwd)`,
+		`(\|.*ls)`,
+		`(;.*ls)`,
+		`(&.*ls)`,
+		`(\|.*cat)`,
+		`(;.*cat)`,
+		`(&.*cat)`,
+		`(\|.*rm)`,
+		`(;.*rm)`,
+		`(&.*rm)`,
+		`(\|.*id)`,
+		`(;.*id)`,
+		`(&.*id)`,
+		`(rm -rf)`,
+		`(chmod 777)`,
 	}
 
-	// Path Traversal
+	// Path Traversal - ПРОСТЫЕ ПАТТЕРНЫ
 	pathPatterns := []string{
-		`(\.\./|\.\.\\)`,
-		`(/etc/passwd|/bin/sh|/etc/shadow)`,
+		`(\.\.\/)`,
+		`(\.\.\\)`,
+		`(\/etc\/passwd)`,
+		`(\/etc\/shadow)`,
+		`(\/bin\/sh)`,
+		`(\\windows\\system32)`,
 	}
+
+	// Clear existing patterns
+	s.redisClient.Del(ctx, "waf:sqli", "waf:xss", "waf:cmdi", "waf:pathtraversal")
 
 	// Add all patterns to Redis
 	s.redisClient.SAdd(ctx, "waf:sqli", sqlPatterns)
 	s.redisClient.SAdd(ctx, "waf:xss", xssPatterns)
 	s.redisClient.SAdd(ctx, "waf:cmdi", cmdPatterns)
 	s.redisClient.SAdd(ctx, "waf:pathtraversal", pathPatterns)
+
+	log.Printf("Loaded %d SQLi patterns", len(sqlPatterns))
+	log.Printf("Loaded %d XSS patterns", len(xssPatterns))
+	log.Printf("Loaded %d CMDi patterns", len(cmdPatterns))
+	log.Printf("Loaded %d Path Traversal patterns", len(pathPatterns))
 }
 
 func (s *SignatureServer) Start(addr string) {

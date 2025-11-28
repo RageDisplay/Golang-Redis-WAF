@@ -31,13 +31,12 @@ var templateFuncs = template.FuncMap{
 }
 
 type AppConfig struct {
-	TargetURL      string `json:"target_url"`
-	ListenPort     string `json:"listen_port"`
-	EnableSQLi     bool   `json:"enable_sqli"`
-	EnableXSS      bool   `json:"enable_xss"`
-	EnableCMDi     bool   `json:"enable_cmdi"`
-	EnablePath     bool   `json:"enable_path"`
-	EnableAnalyzer bool   `json:"enable_analyzer"`
+	TargetURL  string `json:"target_url"`
+	ListenPort string `json:"listen_port"`
+	EnableSQLi bool   `json:"enable_sqli"`
+	EnableXSS  bool   `json:"enable_xss"`
+	EnableCMDi bool   `json:"enable_cmdi"`
+	EnablePath bool   `json:"enable_path"`
 }
 
 type Stats struct {
@@ -116,13 +115,12 @@ func initDefaultConfig() {
 
 	if exists == 0 {
 		config := AppConfig{
-			TargetURL:      "http://192.168.200.50:7000",
-			ListenPort:     "8081",
-			EnableSQLi:     true,
-			EnableXSS:      true,
-			EnableCMDi:     true,
-			EnablePath:     true,
-			EnableAnalyzer: true, // Включен по умолчанию
+			TargetURL:  "http://192.168.200.50:7000",
+			ListenPort: "8081",
+			EnableSQLi: true,
+			EnableXSS:  true,
+			EnableCMDi: true,
+			EnablePath: true,
 		}
 		saveConfig(config)
 	}

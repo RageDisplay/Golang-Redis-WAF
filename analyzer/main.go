@@ -5,11 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
 
-// Определяем структуры запроса и ответа
 type AnalysisRequest struct {
 	Method  string            `json:"method"`
 	URL     string            `json:"url"`
@@ -55,45 +55,54 @@ func (a *Analyzer) analyzeRequest(req *AnalysisRequest) *AnalysisResponse {
 	threatLevel := 0
 	var matches []string
 
-	// Проверка методов
+	// Dangerous methods
 	if req.Method == "TRACE" || req.Method == "TRACK" {
-		threatLevel += 3
-		matches = append(matches, "suspicious_method:"+req.Method)
+		threatLevel += 10
+		matches = append(matches, "dangerous_method:"+req.Method)
 	}
 
-	// Проверка заголовков
+	// Check headers for obvious attacks
 	for name, value := range req.Headers {
-		if strings.Contains(strings.ToLower(name), "x-forwarded") {
-			threatLevel += 1
+		lowerValue := strings.ToLower(value)
+
+		if containsSQLPatterns(lowerValue) && len(lowerValue) > 30 {
+			threatLevel += 5
+			matches = append(matches, "sql_in_header:"+name)
 		}
-		if strings.Contains(strings.ToLower(value), "select") {
-			threatLevel += 2
-		}
 	}
 
-	// Проверка URL
-	if len(req.URL) > 1024 {
-		threatLevel += 2
-		matches = append(matches, "long_url")
-	}
-
-	// Проверка тела запроса
-	lowerBody := strings.ToLower(req.Body)
-	if strings.Contains(lowerBody, "<script") {
-		threatLevel += 5
-		matches = append(matches, "xss_pattern")
-	}
-
-	if strings.Contains(lowerBody, "union select") {
+	// Check URL for explicit attacks
+	urlLower := strings.ToLower(req.URL)
+	if containsExplicitSQLPatterns(urlLower) {
 		threatLevel += 8
-		matches = append(matches, "sqli_pattern")
+		matches = append(matches, "explicit_sqli_in_url")
 	}
 
-	// Определение действия
+	if containsExplicitXSSPatterns(urlLower) {
+		threatLevel += 8
+		matches = append(matches, "explicit_xss_in_url")
+	}
+
+	// Check body for large attacks
+	if len(req.Body) > 500 {
+		lowerBody := strings.ToLower(req.Body)
+
+		if containsExplicitSQLPatterns(lowerBody) {
+			threatLevel += 10
+			matches = append(matches, "explicit_sqli_in_body")
+		}
+
+		if containsExplicitXSSPatterns(lowerBody) {
+			threatLevel += 10
+			matches = append(matches, "explicit_xss_in_body")
+		}
+	}
+
+	// Higher threshold for blocking
 	action := "allow"
-	if threatLevel > 7 {
+	if threatLevel > 12 {
 		action = "block"
-	} else if threatLevel > 4 {
+	} else if threatLevel > 6 {
 		action = "captcha"
 	}
 
@@ -102,6 +111,51 @@ func (a *Analyzer) analyzeRequest(req *AnalysisRequest) *AnalysisResponse {
 		Matches:     matches,
 		Action:      action,
 	}
+}
+
+func containsSQLPatterns(input string) bool {
+	patterns := []string{
+		`union.*select`, `select.*from`, `insert.*into`, `delete.*from`,
+		`drop.*table`, `update.*set`, `xp_cmdshell`, `waitfor.*delay`,
+		`1=1`, `or.*=.*`, `and.*=.*`, `--`, `#`, `/\*`, `\*/`,
+	}
+
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString("(?i)"+pattern, input); matched {
+			return true
+		}
+	}
+	return false
+}
+
+func containsExplicitSQLPatterns(input string) bool {
+	patterns := []string{
+		`union\s+select\s+null`, `xp_cmdshell`, `waitfor\s+delay`,
+		`1=1--`, `or\s+1=1--`, `and\s+1=1--`,
+		`information_schema\.`, `pg_catalog\.`,
+	}
+
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString("(?i)"+pattern, input); matched {
+			return true
+		}
+	}
+	return false
+}
+
+func containsExplicitXSSPatterns(input string) bool {
+	patterns := []string{
+		`<script>alert\(`, `<script>confirm\(`, `<script>prompt\(`,
+		`javascript:alert\(`, `javascript:confirm\(`, `javascript:prompt\(`,
+		`onclick=alert\(`, `onload=alert\(`, `onerror=alert\(`,
+	}
+
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString("(?i)"+pattern, input); matched {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) Start(addr string) {

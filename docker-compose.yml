@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Redis для хранения сигнатур
+  # Redis для хранения сигнатур и конфигурации
   redis:
     image: redis:alpine
     ports:
@@ -46,6 +46,21 @@ services:
     depends_on:
       - redis
       - analyzer
+    networks:
+      - waf-net
+
+  # Веб-интерфейс для управления WAF
+  waf-admin:
+    build:
+      context: ./waf-admin
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - WAFPROXY_URL=http://wafproxy:8081
+    depends_on:
+      - redis
+      - wafproxy
     networks:
       - waf-net
 

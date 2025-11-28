@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <a href="/" class="navbar-brand">WAF Dashboard</a>
+            <ul class="navbar-nav">
+                <li><a href="/" class="nav-link active">Главная</a></li>
+                <li><a href="/config" class="nav-link">Настройки</a></li>
+                <li><a href="/logs" class="nav-link">Логи</a></li>
+                <li><a href="/stats" class="nav-link">Статистика</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard">
+            <div class="card stat-card">
+                <div class="stat-number" id="totalRequests">{{.Stats.TotalRequests}}</div>
+                <div class="stat-label">Всего запросов</div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-number" id="blockedRequests">{{.Stats.BlockedRequests}}</div>
+                <div class="stat-label">Заблокировано</div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-number" id="blockRate">
+                    {{if gt .Stats.TotalRequests 0}}
+                        {{percent .Stats.BlockedRequests .Stats.TotalRequests}}%
+                    {{else}}0.00%{{end}}
+                </div>
+                <div class="stat-label">Уровень блокировки</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 1rem;">Статус защиты</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 12px; height: 12px; border-radius: 50%; background: {{if .Config.EnableSQLi}}var(--success){{else}}var(--danger){{end}};"></div>
+                    <span>SQL Injection</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 12px; height: 12px; border-radius: 50%; background: {{if .Config.EnableXSS}}var(--success){{else}}var(--danger){{end}};"></div>
+                    <span>XSS Protection</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 12px; height: 12px; border-radius: 50%; background: {{if .Config.EnableCMDi}}var(--success){{else}}var(--danger){{end}};"></div>
+                    <span>Command Injection</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="width: 12px; height: 12px; border-radius: 50%; background: {{if .Config.EnablePath}}var(--success){{else}}var(--danger){{end}};"></div>
+                    <span>Path Traversal</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 1rem;">Текущая конфигурация</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>
+                    <strong>Целевое приложение:</strong><br>
+                    {{.Config.TargetURL}}
+                </div>
+                <div>
+                    <strong>Порт WAF:</strong><br>
+                    {{.Config.ListenPort}}
+                </div>
+            </div>
+            <div style="margin-top: 1rem;">
+                <a href="/config" class="btn btn-primary">Настроить</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket для обновления статистики в реальном времени
+        const ws = new WebSocket(`ws://${window.location.host}/api/ws`);
+        
+        ws.onmessage = function(event) {
+            const stats = JSON.parse(event.data);
+            document.getElementById('totalRequests').textContent = stats.total_requests;
+            document.getElementById('blockedRequests').textContent = stats.blocked_requests;
+            
+            // Вычисляем процент блокировки
+            let blockRate = "0.00";
+            if (stats.total_requests > 0) {
+                blockRate = ((stats.blocked_requests / stats.total_requests) * 100).toFixed(2);
+            }
+            document.getElementById('blockRate').textContent = blockRate + '%';
+        };
+    </script>
+</body>
+</html>

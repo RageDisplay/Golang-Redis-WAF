@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Логи WAF</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <a href="/" class="navbar-brand">WAF Dashboard</a>
+            <ul class="navbar-nav">
+                <li><a href="/" class="nav-link">Главная</a></li>
+                <li><a href="/config" class="nav-link">Настройки</a></li>
+                <li><a href="/logs" class="nav-link active">Логи</a></li>
+                <li><a href="/stats" class="nav-link">Статистика</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <h2 style="margin-bottom: 1rem;">Логи безопасности</h2>
+            <div id="logsContainer">
+                <div class="loading"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const logs = await response.json();
+                
+                const container = document.getElementById('logsContainer');
+                
+                if (logs.length === 0) {
+                    container.innerHTML = '<p>Логи отсутствуют</p>';
+                    return;
+                }
+                
+                container.innerHTML = logs.map(log => `
+                    <div class="log-entry">
+                        <div style="display: flex; justify-content: between; margin-bottom: 0.5rem;">
+                            <strong>${new Date(log.timestamp).toLocaleString()}</strong>
+                            <span class="badge ${log.action === 'block' ? 'badge-danger' : 'badge-success'}">${log.action}</span>
+                        </div>
+                        <div><strong>IP:</strong> ${log.ip}</div>
+                        <div><strong>Метод:</strong> ${log.method}</div>
+                        <div><strong>URL:</strong> ${log.url}</div>
+                        ${log.threats && log.threats.length > 0 ? `
+                            <div class="log-threats">
+                                <strong>Угрозы:</strong>
+                                ${log.threats.map(threat => `<span class="log-threat">${threat}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('logsContainer').innerHTML = '<p>Ошибка загрузки логов</p>';
+            }
+        }
+
+        // Загружаем логи при загрузке страницы и каждые 10 секунд
+        loadLogs();
+        setInterval(loadLogs, 10000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки WAF</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <a href="/" class="navbar-brand">WAF Dashboard</a>
+            <ul class="navbar-nav">
+                <li><a href="/" class="nav-link">Главная</a></li>
+                <li><a href="/config" class="nav-link active">Настройки</a></li>
+                <li><a href="/logs" class="nav-link">Логи</a></li>
+                <li><a href="/stats" class="nav-link">Статистика</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="config-form">
+            <h2 style="margin-bottom: 2rem;">Настройки WAF</h2>
+            
+            <form id="configForm">
+                <div class="form-group">
+                    <label class="form-label">URL защищаемого приложения</label>
+                    <input type="url" class="form-control" name="target_url" value="{{.TargetURL}}" required>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label class="form-label">Порт WAF</label>
+                        <input type="number" class="form-control" name="listen_port" value="{{.ListenPort}}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Порт приложения</label>
+                        <input type="number" class="form-control" name="app_port" value="{{.AppPort}}" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight: bold; margin-bottom: 1rem; display: block;">Модули защиты</label>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enable_sqli" name="enable_sqli" {{if .EnableSQLi}}checked{{end}}>
+                            <label for="enable_sqli">SQL Injection Protection</label>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enable_xss" name="enable_xss" {{if .EnableXSS}}checked{{end}}>
+                            <label for="enable_xss">XSS Protection</label>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enable_cmdi" name="enable_cmdi" {{if .EnableCMDi}}checked{{end}}>
+                            <label for="enable_cmdi">Command Injection Protection</label>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enable_path" name="enable_path" {{if .EnablePath}}checked{{end}}>
+                            <label for="enable_path">Path Traversal Protection</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enable_analyzer" name="enable_analyzer" {{if .EnableAnalyzer}}checked{{end}}>
+                        <label for="enable_analyzer">Включить анализатор запросов</label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="saveBtn">
+                    <span id="saveText">Сохранить настройки</span>
+                    <span id="saveLoading" class="loading" style="display: none;"></span>
+                </button>
+            </form>
+
+            <div id="message" style="margin-top: 1rem;"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('configForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const config = {
+                target_url: formData.get('target_url'),
+                listen_port: formData.get('listen_port'),
+                app_port: formData.get('app_port'),
+                enable_sqli: formData.get('enable_sqli') === 'on',
+                enable_xss: formData.get('enable_xss') === 'on',
+                enable_cmdi: formData.get('enable_cmdi') === 'on',
+                enable_path: formData.get('enable_path') === 'on',
+                enable_analyzer: formData.get('enable_analyzer') === 'on'
+            };
+
+            const saveBtn = document.getElementById('saveBtn');
+            const saveText = document.getElementById('saveText');
+            const saveLoading = document.getElementById('saveLoading');
+            const message = document.getElementById('message');
+
+            saveText.style.display = 'none';
+            saveLoading.style.display = 'inline-block';
+            saveBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                if (response.ok) {
+                    message.innerHTML = '<div class="alert alert-success">Настройки успешно сохранены!</div>';
+                } else {
+                    throw new Error('Ошибка сохранения');
+                }
+            } catch (error) {
+                message.innerHTML = '<div class="alert alert-danger">Ошибка сохранения настроек: ' + error.message + '</div>';
+            } finally {
+                saveText.style.display = 'inline-block';
+                saveLoading.style.display = 'none';
+                saveBtn.disabled = false;
+
+                setTimeout(() => {
+                    message.innerHTML = '';
+                }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>

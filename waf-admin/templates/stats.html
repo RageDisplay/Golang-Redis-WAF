@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика WAF</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <a href="/" class="navbar-brand">WAF Dashboard</a>
+            <ul class="navbar-nav">
+                <li><a href="/" class="nav-link">Главная</a></li>
+                <li><a href="/config" class="nav-link">Настройки</a></li>
+                <li><a href="/logs" class="nav-link">Логи</a></li>
+                <li><a href="/stats" class="nav-link active">Статистика</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <h2 style="margin-bottom: 1rem;">Статистика угроз по типам</h2>
+            <div class="chart-container">
+                <canvas id="threatsChart"></canvas>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+            <div class="card">
+                <h3>Общая статистика</h3>
+                <div id="generalStats">
+                    <div class="loading"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Эффективность защиты</h3>
+                <div id="efficiencyStats">
+                    <div class="loading"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let threatsChart;
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                updateCharts(stats);
+                updateStatsDisplay(stats);
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        function updateCharts(stats) {
+            const ctx = document.getElementById('threatsChart').getContext('2d');
+            
+            if (threatsChart) {
+                threatsChart.destroy();
+            }
+
+            const threatsData = {
+                labels: ['SQL Injection', 'XSS', 'Command Injection', 'Path Traversal'],
+                datasets: [{
+                    data: [
+                        stats.threats_by_type.sqli || 0,
+                        stats.threats_by_type.xss || 0,
+                        stats.threats_by_type.cmdi || 0,
+                        stats.threats_by_type.pathtraversal || 0
+                    ],
+                    backgroundColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#9b59b6',
+                        '#3498db'
+                    ]
+                }]
+            };
+
+            threatsChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: threatsData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateStatsDisplay(stats) {
+            const generalStats = document.getElementById('generalStats');
+            const efficiencyStats = document.getElementById('efficiencyStats');
+
+            const blockRate = stats.total_requests > 0 ? 
+                ((stats.blocked_requests / stats.total_requests) * 100).toFixed(2) : 0;
+
+            generalStats.innerHTML = `
+                <div style="margin-bottom: 0.5rem;"><strong>Всего запросов:</strong> ${stats.total_requests}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Заблокировано:</strong> ${stats.blocked_requests}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>SQLi атак:</strong> ${stats.threats_by_type.sqli || 0}</div>
+                <div style="margin-bottom: 0.5rem;"><strong>XSS атак:</strong> ${stats.threats_by_type.xss || 0}</div>
+                <div><strong>Обновлено:</strong> ${new Date(stats.last_updated).toLocaleString()}</div>
+            `;
+
+            efficiencyStats.innerHTML = `
+                <div style="margin-bottom: 0.5rem;"><strong>Уровень блокировки:</strong> ${blockRate}%</div>
+                <div style="margin-bottom: 0.5rem;"><strong>Успешных запросов:</strong> ${stats.total_requests - stats.blocked_requests}</div>
+                <div style="margin-bottom: 0.5rem;">
+                    <strong>Статус:</strong> 
+                    <span class="badge ${blockRate > 5 ? 'badge-warning' : 'badge-success'}">
+                        ${blockRate > 5 ? 'Высокая активность' : 'Норма'}
+                    </span>
+                </div>
+            `;
+        }
+
+        // WebSocket для обновления статистики в реальном времени
+        const ws = new WebSocket(`ws://${window.location.host}/api/ws`);
+        
+        ws.onmessage = function(event) {
+            const stats = JSON.parse(event.data);
+            updateCharts(stats);
+            updateStatsDisplay(stats);
+        };
+
+        // Первоначальная загрузка
+        loadStats();
+    </script>
+</body>
+</html>

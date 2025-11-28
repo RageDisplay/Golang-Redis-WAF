@@ -177,9 +177,6 @@ func (p *WAFProxy) checkPatterns(input string) []string {
 func (p *WAFProxy) updateStats(threatType string) {
 	ctx := context.Background()
 
-	// Увеличиваем счетчик общего количества запросов
-	p.redisClient.Incr(ctx, "waf:stats:total_requests")
-
 	// Увеличиваем счетчик заблокированных запросов
 	p.redisClient.Incr(ctx, "waf:stats:blocked_requests")
 
@@ -239,10 +236,18 @@ func (p *WAFProxy) analyzeRequest(r *http.Request) (*AnalysisResponse, error) {
 		return nil, err
 	}
 
+	// Логируем анализ если есть угрозы
+	if analysisResp.ThreatLevel > 0 {
+		log.Printf("Analyzer detected threats: %v, level: %d", analysisResp.Matches, analysisResp.ThreatLevel)
+	}
+
 	return &analysisResp, nil
 }
 
 func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Увеличиваем счетчик всех запросов
+	p.updateTotalRequests()
+
 	// First check with fast pattern matching
 	if isBlocked, threats := p.checkRequest(r); isBlocked {
 		log.Printf("Request blocked by WAF. Threats: %v", threats)
@@ -258,12 +263,23 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Continue with request if analysis fails
 		} else if analysis.ThreatLevel > 5 { // Medium threat level
 			log.Printf("Request blocked by analyzer. Threat level: %d", analysis.ThreatLevel)
+			p.updateBlockedRequests()
 			http.Error(w, "Request blocked by WAF analyzer", http.StatusForbidden)
 			return
 		}
 	}
 
 	p.proxy.ServeHTTP(w, r)
+}
+
+func (p *WAFProxy) updateTotalRequests() {
+	ctx := context.Background()
+	p.redisClient.Incr(ctx, "waf:stats:total_requests")
+}
+
+func (p *WAFProxy) updateBlockedRequests() {
+	ctx := context.Background()
+	p.redisClient.Incr(ctx, "waf:stats:blocked_requests")
 }
 
 func (p *WAFProxy) loadConfig() {
@@ -276,7 +292,6 @@ func (p *WAFProxy) loadConfig() {
 		p.config = &AppConfig{
 			TargetURL:      "http://192.168.200.50:7000",
 			ListenPort:     "8081",
-			AppPort:        "7000",
 			EnableSQLi:     true,
 			EnableXSS:      true,
 			EnableCMDi:     true,

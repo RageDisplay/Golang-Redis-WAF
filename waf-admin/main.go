@@ -33,7 +33,6 @@ var templateFuncs = template.FuncMap{
 type AppConfig struct {
 	TargetURL      string `json:"target_url"`
 	ListenPort     string `json:"listen_port"`
-	AppPort        string `json:"app_port"`
 	EnableSQLi     bool   `json:"enable_sqli"`
 	EnableXSS      bool   `json:"enable_xss"`
 	EnableCMDi     bool   `json:"enable_cmdi"`
@@ -119,12 +118,11 @@ func initDefaultConfig() {
 		config := AppConfig{
 			TargetURL:      "http://192.168.200.50:7000",
 			ListenPort:     "8081",
-			AppPort:        "7000",
 			EnableSQLi:     true,
 			EnableXSS:      true,
 			EnableCMDi:     true,
 			EnablePath:     true,
-			EnableAnalyzer: true,
+			EnableAnalyzer: true, // Включен по умолчанию
 		}
 		saveConfig(config)
 	}

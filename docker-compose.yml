@@ -38,11 +38,12 @@ services:
     build:
       context: ./wafproxy
     ports:
-      - "8081:8081" # Внешний порт для доступа к WAF
+      - "${WAF_PORT:-8081}:${WAF_PORT:-8081}" # Динамический порт из конфигурации
     environment:
       - TARGET_URL=http://192.168.200.50:7000
       - REDIS_ADDR=redis:6379
       - ANALYZER_URL=http://analyzer:8083/analyze
+      - PORT=${WAF_PORT:-8081}
     depends_on:
       - redis
       - analyzer
